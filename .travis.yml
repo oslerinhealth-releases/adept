@@ -1,25 +1,89 @@
-# R for travis: see documentation at https://docs.travis-ci.com/user/languages/r
-
-language: R
-sudo: false
+language: r
 cache: packages
 warnings_are_errors: true
-
+use_bioc: true
+bioc_required: true
+cran: http://cran.rstudio.com
+dist: trusty
+addons:
+  apt:
+    packages:
+    - libfftw3-dev
+    - libgsl0-dev
+    - libgsl0ldbl
+    - jags
 os:
-  - linux
-  - osx
-
+- linux
+- osx
+osx_image: xcode9.4
+services:
+- xvfb
 r:
-  - 3.4
-  - release
-  - devel
-
+- 3.3
+- 3.4
+- 3.5
+- release
+- devel
 matrix:
   allow_failures:
-    - r: devel
-
-after_success:
-  - Rscript -e 'covr::codecov(type = "all")'
-
+  - r: devel
 env:
-  - _R_CHECK_SYSTEM_CLOCK_=0
+  global:
+  - RGL_USE_NULL=TRUE
+  - PROJECT_NAME=oslerinhealth-releases
+  - DISPLAY=:99.0
+r_check_args: "--as-cran --install-args=--build"
+before_install:
+- ulimit -n 2048
+- export PROJ_DIR=`basename $PWD`
+- fname=travis_helpers.sh
+- wget -O ${fname} http://bit.ly/travis_helpers
+- cat ${fname}; source ${fname}; rm ${fname}
+- cat DESCRIPTION
+- codename=`linux_codename`;
+- if [ "${codename}" = "trusty" ]; then start_xvfb ; fi
+- export rver=`r_version`; echo $rver ;
+- if [ "$TRAVIS_OS_NAME" = "osx" ]; then no_open_mp ; fi
+- jags_install || true;
+- v8_install || true;
+- dcmtk_install || true;
+- gsl_install 2.1 || true ;
+- remove_neuroc_packages
+- cat DESCRIPTION
+- install_remotes_no_dep
+- cat DESCRIPTION
+- export PACKAGE_NAME=`package_name`
+- echo "Package Name is $PACKAGE_NAME"
+- install_python_requirements ;
+after_success:
+- cat ${PACKAGE_NAME}.Rcheck/00install.out
+- cat ${PACKAGE_NAME}.Rcheck/00check.log
+after_failure:
+- cat ${PACKAGE_NAME}.Rcheck/00install.out
+- cat ${PACKAGE_NAME}.Rcheck/00check.log
+before_deploy:
+- if [ "$TRAVIS_OS_NAME" = "osx" ]; then PKG_TARBALL=$(ls -1t *.tgz | head -n 1);
+  PKG_TARBALL_WITH_R=`echo $PKG_TARBALL | sed 's/.tgz/_'"R${rver}"'.tgz/'` ; mv ${PKG_TARBALL}
+  ${PKG_TARBALL_WITH_R} ; echo "Built tarball is ${PKG_TARBALL_WITH_R}" ; fi
+- if [ "$TRAVIS_OS_NAME" = "linux" ]; then PKG_TARBALL=$(ls -1t *.tar.gz | head -n
+  1); PKG_TARBALL_WITH_R=`echo $PKG_TARBALL | sed 's/.tar.gz/_'"R${rver}"'.tar.gz/'`
+  ; mv ${PKG_TARBALL} ${PKG_TARBALL_WITH_R} ; echo "Built tarball is ${PKG_TARBALL_WITH_R}"
+  ; fi
+- if [[ "${TRAVIS_OS_NAME}" = "osx" ]]; then rm -f *.tar.gz; fi
+deploy:
+  provider: releases
+  skip_cleanup: true
+  file_glob: true
+  file: "${PACKAGE_NAME}*.t*gz"
+  on:
+    tags: true
+  api-key:
+    secure: sFSym1abcVHmJahiS155TvKOpNsSqvS8SNQ0KOtK2ECwv5PNXa4lOlffY4BH8FeiyP2wkqFLi/BKEsVMI6mBNJbnDja7ApaOqHJ1n2/kgi4JhIsn0cVoZmzhHuAjezp9xI9jlluNeRMkWXsqbsLJHVXgpor+TnI+J1I0oqG6kaFlDeWCm8vBfqO3guAQXpvGTa1dR/MRwJu4hUaLTNOvg0/sT6INLc78gPVLyqHHfnz6BNx5PxOjb/NUmKJo9Xqk5vNRZ30kW/A+meWQi/NdzeE3mdmkXE9BJAkH6yfx8hMpFyxA0sTsupOvCsf5co0zpWUp/UFX/v5+Ez/z7d4+Pb/b4OHlWYC/oBnO7RcZIbxhnRr737PY0AqcCL3rt1waz6b4Y14TWs2CrgnWTp5MUUBJ2R0dXPLinN1QJ4Ma/KN9uv9LSE+a5s3X5vhzInZjtLGtp2PeA/iibQFtyaEMbs4pOnfw/GOAKMMADkUGMO/5I6YGQdBDn7KbgVtDB0GAw0tSKzi41JN2nnF7Q2byn7j0Aep1yfQPk41fNRavi++inrVQyb2ocJg5cPQ+ufCM0zU+C7DxgCn5hTV7FkTobh4aSXLE0k23qrGCBtKL5JSIUNvJbrWwEiRS7bYSCTFatxdj3Wr5c93UW4eT+ol7UolroRTngISCEc+U1eIcZWY=
+after_deploy:
+- echo "${PROJECT_NAME}" | grep -q "releases"; if [[ $? -eq 0 ]]; then run_coverage="false";
+  else run_coverage=; fi;
+- if [[ "${TRAVIS_OS_NAME}" == "linux" && ${TRAVIS_R_VERSION_STRING} = "release" &&
+  -z "${run_coverage}" ]]; then echo 'covr::coveralls(type = "all", quiet = FALSE)'
+  > osler_covr.R ; travis_wait 100 Rscript osler_covr.R ; rm osler_covr.R ; fi
+
+#neuroc.deps version (SHA): a5aa5ca
